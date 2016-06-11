@@ -15,7 +15,7 @@ module GraphQL
         operation_resolution.new(
           irep_root,
           root_type,
-          ExecutionContext.new(query_object, self)
+          GraphQL::Execution::Context.new(query_object, self)
         ).result
       end
 
@@ -34,7 +34,6 @@ module GraphQL
   end
 end
 
-require "graphql/query/serial_execution/execution_context"
 require "graphql/query/serial_execution/value_resolution"
 require "graphql/query/serial_execution/field_resolution"
 require "graphql/query/serial_execution/operation_resolution"
