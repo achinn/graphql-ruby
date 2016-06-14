@@ -51,7 +51,7 @@ module GraphQL
       @middleware = [@rescue_middleware]
       @query_analyzers = []
       # Default to the built-in execution strategy:
-      self.query_execution_strategy = GraphQL::Query::SerialExecution
+      self.query_execution_strategy = GraphQL::Execution::DeferredExecution
       self.mutation_execution_strategy = GraphQL::Query::SerialExecution
       self.subscription_execution_strategy = GraphQL::Query::SerialExecution
     end
