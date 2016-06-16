@@ -1,3 +1,9 @@
+require "graphql/query/serial_execution/execution_context"
+require "graphql/query/serial_execution/value_resolution"
+require "graphql/query/serial_execution/field_resolution"
+require "graphql/query/serial_execution/operation_resolution"
+require "graphql/query/serial_execution/selection_resolution"
+
 module GraphQL
   class Query
     class SerialExecution
@@ -15,7 +21,7 @@ module GraphQL
         operation_resolution.new(
           irep_root,
           root_type,
-          GraphQL::Execution::Context.new(query_object, self)
+          ExecutionContext.new(query_object, self)
         ).result
       end
 
@@ -33,8 +39,3 @@ module GraphQL
     end
   end
 end
-
-require "graphql/query/serial_execution/value_resolution"
-require "graphql/query/serial_execution/field_resolution"
-require "graphql/query/serial_execution/operation_resolution"
-require "graphql/query/serial_execution/selection_resolution"
