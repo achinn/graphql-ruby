@@ -28,7 +28,7 @@ module GraphQL
         private
 
         def included_by_directives?(irep_node, query)
-          GraphQL::Query::DirectiveResolution.include_node?(irep_node, query)
+          !GraphQL::Execution::DirectiveChecks.skip?(irep_node, query)
         end
 
         def applies_to_type?(irep_node, type, target)
