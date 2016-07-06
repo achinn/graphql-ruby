@@ -23,6 +23,9 @@ module GraphQL
               memo.merge!(field_result)
             end
           end
+        rescue GraphQL::InvalidNullError => err
+          err.parent_error? || execution_context.add_error(err)
+          nil
         end
 
         private
