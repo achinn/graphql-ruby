@@ -2,11 +2,13 @@ require "spec_helper"
 
 class ArrayCollector
   attr_reader :patches
-  def initialize
+  def initialize(logger: nil)
     @patches = []
+    @logger = logger
   end
 
   def patch(path:, value:)
+    @logger && @logger.push({path: path, value: value})
     patches << {path: path, value: value}
   end
 
@@ -263,7 +265,91 @@ describe GraphQL::Execution::DeferredExecution do
       assert_equal({"id"=>3}, collector.patches[3][:value])
     end
 
-    it "supports lazy enumeration"
-    it "defers nested defers"
+    describe "nested defers" do
+      let(:query_string) {%|
+      {
+        cheeses @stream {
+          id
+          flavor @defer
+        }
+      }
+      |}
+
+      it "pushes them after streaming items" do
+        result
+        pp collector.patches
+        # - 1 empty-list + (1 id + 1 flavor) * list-items
+        assert_equal(7, collector.patches.length)
+        assert_equal([], collector.patches[0][:path])
+        assert_equal({"data" => { "cheeses" => [] } }, collector.patches[0][:value])
+        assert_equal(["data", "cheeses", 0], collector.patches[1][:path])
+        assert_equal({"id"=>1}, collector.patches[1][:value])
+        assert_equal(["data", "cheeses", 0, "flavor"], collector.patches[2][:path])
+        assert_equal("Brie", collector.patches[2][:value])
+        assert_equal(["data", "cheeses", 1], collector.patches[3][:path])
+        assert_equal({"id"=>2}, collector.patches[3][:value])
+        assert_equal(["data", "cheeses", 1, "flavor"], collector.patches[4][:path])
+        assert_equal("Gouda", collector.patches[4][:value])
+        assert_equal(["data", "cheeses", 2], collector.patches[5][:path])
+        assert_equal({"id"=>3}, collector.patches[5][:value])
+        assert_equal(["data", "cheeses", 2, "flavor"], collector.patches[6][:path])
+        assert_equal("Manchego", collector.patches[6][:value])
+      end
+    end
+
+    describe "lazy enumerators" do
+      let(:event_log) { [] }
+      let(:collector) { ArrayCollector.new(logger: event_log) }
+      let(:lazy_schema) {
+        logger = event_log
+        query_type = GraphQL::ObjectType.define do
+          name("Query")
+          field :lazyInts, types[types.Int] do
+            argument :items, !types.Int
+            resolve -> (obj, args, ctx) {
+              Enumerator.new do |yielder|
+                i = 0
+                while i < args[:items]
+                  logger.push({yield: i})
+                  yielder.yield(i)
+                  i += 1
+                end
+              end
+            }
+          end
+        end
+        schema = GraphQL::Schema.new(query: query_type)
+        schema.query_execution_strategy = GraphQL::Execution::DeferredExecution
+        schema
+      }
+
+      let(:result) {
+        lazy_schema.execute(query_string, context: {collector: collector})
+      }
+
+      let(:query_string) {%|
+      {
+        lazyInts(items: 4) @stream
+      }
+      |}
+
+      it "evaluates them lazily" do
+        result
+        # The goal here is that the enumerator is called
+        # _after_ each patch, not all once ahead of time.
+        expected_events = [
+          {path: [], value: {"data"=>{"lazyInts"=>[]}}},
+          {yield: 0},
+          {path: ["data", "lazyInts", 0], value: 0},
+          {yield: 1},
+          {path: ["data", "lazyInts", 1], value: 1},
+          {yield: 2},
+          {path: ["data", "lazyInts", 2], value: 2},
+          {yield: 3},
+          {path: ["data", "lazyInts", 3], value: 3}
+        ]
+        assert_equal expected_events, event_log
+      end
+    end
   end
 end
