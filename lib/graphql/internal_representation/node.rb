@@ -3,10 +3,11 @@ require "set"
 module GraphQL
   module InternalRepresentation
     class Node
-      def initialize(ast_node:, return_type: nil, on_types: Set.new, name: nil, definition: nil, children: {}, spreads: [], directives: Set.new)
+      def initialize(ast_node:, return_type: nil, on_types: Set.new, name: nil, definition: nil, children: {}, spreads: [], directives: Set.new, on_node: nil)
         @ast_node = ast_node
         @return_type = return_type
         @on_types = on_types
+        @on_node = on_node
         @name = name
         @definition = definition
         @children = children
@@ -22,6 +23,8 @@ module GraphQL
       # @return [Set<GraphQL::Language::Nodes::Directive>]
       attr_reader :directives
 
+      # This might not be right: for example, if this irep node has multiple types or
+      # if the `on_type` is an interface, you still need to look up the field on the runtime type.
       # @return [GraphQL::Field, GraphQL::Directive] The definition to use to execute this node
       attr_reader :definition
 
@@ -30,6 +33,9 @@ module GraphQL
 
       # @return [GraphQL::Language::Nodes::AbstractNode] The AST node (or one of the nodes) where this was derived from
       attr_reader :ast_node
+
+      # @return [GraphQL::Rewrite::Node] The parent node, used to determin Directive owner
+      attr_reader :on_node
 
       # This may come from the previous field's return value or an explicitly-typed fragment
       # @example On-type from previous return value

@@ -66,13 +66,14 @@ module GraphQL
       # @return [Object] the initial result, without any defers
       def execute(ast_operation, root_type, query_object)
         collector = query_object.context[CONTEXT_PATCH_TARGET]
+        irep_root = query_object.internal_representation[ast_operation.name]
 
         scope = ExecScope.new(query_object)
         initial_thread = ExecThread.new
         initial_frame = ExecFrame.new(
-          node: ast_operation,
+          node: irep_root,
           value: query_object.root_value,
-          type: root_type,
+          type: irep_root.return_type,
           path: []
         )
 
@@ -194,7 +195,7 @@ module GraphQL
 
       # One step of execution. Each step in execution gets its own frame.
       #
-      # - {ExecFrame#node} is the AST node which is being interpreted
+      # - {ExecFrame#node} is the IRep node which is being interpreted
       # - {ExecFrame#path} is like a stack trace, it is used for patching deferred values
       # - {ExecFrame#value} is the object being exposed by GraphQL at this point
       # - {ExecFrame#type} is the GraphQL type which exposes {#value} at this point
@@ -239,15 +240,13 @@ module GraphQL
       # Determine this frame's result and return it
       # Any subselections marked as `@defer` will be deferred.
       def resolve_frame(scope, thread, frame)
-        ast_node = frame.node
+        ast_node = frame.node.ast_node
         case ast_node
         when Nodes::OperationDefinition
           resolve_selections(scope, thread, frame)
         when Nodes::Field
           type_defn = frame.type
-          # Use scope because it provides dynamic fields too (like __typename)
-          field_defn = scope.get_field(type_defn, ast_node.name)
-
+          field_defn = scope.get_field(type_defn, frame.node.definition.name)
           field_result = resolve_field_frame(scope, thread, frame, field_defn)
           return_type_defn = field_defn.type
 
@@ -261,42 +260,43 @@ module GraphQL
         else
           raise("No defined resolution for #{ast_node.class.name} (#{ast_node})")
         end
+      rescue GraphQL::InvalidNullError => err
+        if return_type_defn && return_type_defn.kind.non_null?
+          raise(err)
+        else
+          err.parent_error? || thread.errors << err
+          nil
+        end
       end
 
       # Recursively resolve selections on `outer_frame.node`.
       # Return a `Hash<String, Any>` of identifiers and results.
       # Deferred fields will be absent from the result.
       def resolve_selections(scope, thread, outer_frame)
-        merged_selections = GraphQL::Execution::SelectionOnType.flatten(
-          scope,
-          outer_frame.value,
-          outer_frame.type,
-          outer_frame.node.selections,
-        )
+        merged_selections = outer_frame.node.children
+        query = scope.query
 
-        resolved_selections = merged_selections.each_with_object({}) do |ast_selection, memo|
-          selection_key = if ast_selection.is_a?(Nodes::Field)
-            ast_selection.alias || ast_selection.name
-          else
-            ast_selection.name
+        resolved_selections = merged_selections.each_with_object({}) do |(name, irep_selection), memo|
+          field_applies_to_type = irep_selection.on_types.any? do |child_type|
+            GraphQL::Execution::Typecast.compatible?(outer_frame.value, child_type, outer_frame.type, query.context)
           end
+          if field_applies_to_type && !GraphQL::Execution::DirectiveChecks.skip?(irep_selection, query)
+            selection_key = irep_selection.name
 
-          inner_frame = ExecFrame.new(
-            node: ast_selection,
-            path: outer_frame.path + [selection_key],
-            type: outer_frame.type,
-            value: outer_frame.value,
-          )
+            inner_frame = ExecFrame.new(
+              node: irep_selection,
+              path: outer_frame.path + [selection_key],
+              type: outer_frame.type,
+              value: outer_frame.value,
+            )
 
-          inner_result = resolve_or_defer_frame(scope, thread, inner_frame)
-          if inner_result != DEFERRED_RESULT
-            memo[selection_key] = inner_result
+            inner_result = resolve_or_defer_frame(scope, thread, inner_frame)
+            if inner_result != DEFERRED_RESULT
+              memo[selection_key] = inner_result
+            end
           end
         end
         resolved_selections
-      rescue GraphQL::InvalidNullError => err
-        err.parent_error? || thread.errors << err
-        nil
       end
 
       # Resolve `field_defn` on `frame.node`, returning the value
@@ -304,23 +304,21 @@ module GraphQL
       # It might be an error or an object, not ready for serialization yet.
       # @return [Object] the return value from `field_defn`'s resolve proc
       def resolve_field_frame(scope, thread, frame, field_defn)
-        ast_node = frame.node
+        ast_node = frame.node.ast_node
         type_defn = frame.type
         value = frame.value
         query = scope.query
 
         # Build arguments according to query-string literals, default values, and query variables
-        arguments = GraphQL::Query::LiteralInput.from_arguments(
-          ast_node.arguments,
-          field_defn.arguments,
-          query.variables
-        )
+        arguments = query.arguments_for(frame.node)
 
         # This is the last call in the middleware chain; it actually calls the user's resolve proc
         field_resolve_middleware_proc = -> (_parent_type, parent_object, field_definition, field_args, query_ctx, _next) {
           query_ctx.ast_node = ast_node
+          query_ctx.irep_node = frame.node
           value = field_definition.resolve(parent_object, field_args, query_ctx)
           query_ctx.ast_node = nil
+          query_ctx.irep_node = frame.node
           value
         }
 
@@ -353,7 +351,7 @@ module GraphQL
       def resolve_value(scope, thread, frame, value, type_defn)
         if value.nil? || value.is_a?(GraphQL::ExecutionError)
           if type_defn.kind.non_null?
-            raise GraphQL::InvalidNullError.new(frame.node.name, value)
+            raise GraphQL::InvalidNullError.new(frame.node.ast_node.name, value)
           else
             nil
           end

@@ -11,13 +11,13 @@ module GraphQL
       module_function
 
       # @return [Boolean] Should this AST node be deferred?
-      def defer?(ast_node)
-        ast_node.directives.any? { |dir| dir.name == DEFER }
+      def defer?(irep_node)
+        irep_node.directives.any? { |dir| dir.on_node.ast_node == irep_node.ast_node && dir.name == DEFER }
       end
 
       # @return [Boolean] Should this AST node be streamed?
-      def stream?(ast_node)
-        ast_node.directives.any? { |dir| dir.name == STREAM }
+      def stream?(irep_node)
+        irep_node.directives.any? { |dir| dir.name == STREAM }
       end
 
       # This covers `@include(if:)` & `@skip(if:)`

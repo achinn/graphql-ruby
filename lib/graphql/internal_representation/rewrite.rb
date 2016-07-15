@@ -69,6 +69,7 @@ module GraphQL
             @parent_directives.last << Node.new(
               name: ast_node.name,
               ast_node: ast_node,
+              on_node: @nodes.last,
               definition: context.directive_definition,
             )
           end
