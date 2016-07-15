@@ -36,7 +36,7 @@ module GraphQL
 
         def applies_to_type?(irep_node, type, target)
           irep_node.on_types.any? { |child_type|
-            GraphQL::Query::TypeResolver.new(target, child_type, type, execution_context.query.context).type
+            GraphQL::Execution::Typecast.compatible?(target, child_type, type, execution_context.query.context)
           }
         end
       end

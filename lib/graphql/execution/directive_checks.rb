@@ -22,7 +22,7 @@ module GraphQL
 
       # This covers `@include(if:)` & `@skip(if:)`
       # @return [Boolean] Should this AST node be skipped altogether?
-      def skip?(ast_node, query)
+      def skip?(irep_node, query)
         irep_node.directives.each do |directive_node|
           if directive_node.name == SKIP || directive_node.name == INCLUDE
             directive_defn = directive_node.definition
